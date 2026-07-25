@@ -1,7 +1,9 @@
 #!/bin/sh
 # /etc/uci-defaults/10_enable_extroot
-# This script runs once on first boot. It attempts to mount a partition labeled "overlay"
-# to /mnt, copy existing overlay contents if needed, enable fstab entry, and enable block-mount.
+# This script runs once on first boot. It attempts to mount two USB partitions:
+# 1. overlay partition (3.6G) to /overlay
+# 2. data partition (3.6G) to /data
+# Both partitions are ext4 formatted and labeled accordingly
 
 set -e
 
@@ -11,42 +13,65 @@ echo "enable_extroot: starting" > "$LOG"
 # wait a short time for disks to settle
 sleep 2
 
-if [ ! -e /dev/disk/by-label/overlay ]; then
-  echo "enable_extroot: no /dev/disk/by-label/overlay found" >> "$LOG"
-  exit 0
-fi
+# Function to mount and setup a partition
+mount_partition() {
+	local label=$1
+	local target=$2
+	local partition_size=$3
+	
+	echo "enable_extroot: processing $label partition for $target" >> "$LOG"
+	
+	if [ ! -e /dev/disk/by-label/$label ]; then
+		echo "enable_extroot: no /dev/disk/by-label/$label found" >> "$LOG"
+		return 1
+	fi
+	
+	local MNT=/mnt/${label}_tmp
+	mkdir -p "$MNT"
+	
+	if mount /dev/disk/by-label/$label "$MNT"; then
+		echo "enable_extroot: mounted $label partition to $MNT" >> "$LOG"
+		
+		# If the target is empty (new), copy existing contents if applicable
+		if [ -d "$target" ] && [ -z "$(ls -A "$MNT" 2>/dev/null)" ]; then
+			echo "enable_extroot: copying current $target contents to USB $label partition" >> "$LOG"
+			# Use tar to preserve permissions
+			tar -C "$target" -cf - . | tar -C "$MNT" -xf - || true
+		fi
+		
+		umount "$MNT" || true
+		rmdir "$MNT" || true
+		return 0
+	else
+		echo "enable_extroot: failed to mount $label partition" >> "$LOG"
+		rmdir "$MNT" || true
+		return 1
+	fi
+}
 
-MNT=/mnt/overlay_tmp
-mkdir -p "$MNT"
+# Mount overlay partition (3.6G ext4)
+mount_partition "overlay" "/overlay" "3.6G"
 
-if mount /dev/disk/by-label/overlay "$MNT"; then
-  echo "enable_extroot: mounted overlay partition" >> "$LOG"
-else
-  echo "enable_extroot: failed to mount overlay partition" >> "$LOG"
-  exit 0
-fi
+# Mount data partition (3.6G ext4)
+mount_partition "data" "/data" "3.6G"
 
-# If the target is empty (new), copy existing overlay contents
-if [ -d /overlay ] && [ -z "$(ls -A "$MNT" 2>/dev/null)" ]; then
-  echo "enable_extroot: copying current overlay contents to U盘 overlay" >> "$LOG"
-  # Use tar to preserve permissions
-  tar -C /overlay -cf - . | tar -C "$MNT" -xf - || true
-fi
-
-umount "$MNT" || true
-rmdir "$MNT" || true
-
-# Ensure fstab entry is enabled (the image contains an example fstab using /dev/disk/by-label/overlay)
+# Enable both fstab entries
 if command -v uci >/dev/null 2>&1; then
-  echo "enable_extroot: committing fstab and enabling" >> "$LOG"
-  # If fstab file exists, enable first mount if not already enabled
-  uci set fstab.@mount[0].enabled='1' || true
-  uci commit fstab || true
+	echo "enable_extroot: enabling fstab entries" >> "$LOG"
+	
+	# Enable overlay mount
+	uci set fstab.@mount[0].enabled='1' || true
+	
+	# Enable data mount (second mount point)
+	uci set fstab.@mount[1].enabled='1' || true
+	
+	uci commit fstab || true
 fi
 
 # Enable block-mount init script if present
 if [ -x /etc/init.d/fstab ]; then
-  /etc/init.d/fstab enable || true
+	/etc/init.d/fstab enable || true
+	echo "enable_extroot: enabled block-mount service" >> "$LOG"
 fi
 
 # Clean up: remove this script (uci-defaults files are removed after execution, but keep safe)
