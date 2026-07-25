@@ -10,3 +10,10 @@ config mount
 	option fstype 'ext4'
 	option options 'rw,sync'
 	option enabled '1'
+
+config mount
+	option target '/data'
+	option device '/dev/disk/by-label/data'
+	option fstype 'ext4'
+	option options 'rw,sync'
+	option enabled '1'
