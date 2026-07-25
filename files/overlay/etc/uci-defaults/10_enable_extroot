@@ -1,0 +1,57 @@
+#!/bin/sh
+# /etc/uci-defaults/10_enable_extroot
+# This script runs once on first boot. It attempts to mount a partition labeled "overlay"
+# to /mnt, copy existing overlay contents if needed, enable fstab entry, and enable block-mount.
+
+set -e
+
+LOG=/tmp/enable_extroot.log
+echo "enable_extroot: starting" > "$LOG"
+
+# wait a short time for disks to settle
+sleep 2
+
+if [ ! -e /dev/disk/by-label/overlay ]; then
+  echo "enable_extroot: no /dev/disk/by-label/overlay found" >> "$LOG"
+  exit 0
+fi
+
+MNT=/mnt/overlay_tmp
+mkdir -p "$MNT"
+
+if mount /dev/disk/by-label/overlay "$MNT"; then
+  echo "enable_extroot: mounted overlay partition" >> "$LOG"
+else
+  echo "enable_extroot: failed to mount overlay partition" >> "$LOG"
+  exit 0
+fi
+
+# If the target is empty (new), copy existing overlay contents
+if [ -d /overlay ] && [ -z "$(ls -A "$MNT" 2>/dev/null)" ]; then
+  echo "enable_extroot: copying current overlay contents to U盘 overlay" >> "$LOG"
+  # Use tar to preserve permissions
+  tar -C /overlay -cf - . | tar -C "$MNT" -xf - || true
+fi
+
+umount "$MNT" || true
+rmdir "$MNT" || true
+
+# Ensure fstab entry is enabled (the image contains an example fstab using /dev/disk/by-label/overlay)
+if command -v uci >/dev/null 2>&1; then
+  echo "enable_extroot: committing fstab and enabling" >> "$LOG"
+  # If fstab file exists, enable first mount if not already enabled
+  uci set fstab.@mount[0].enabled='1' || true
+  uci commit fstab || true
+fi
+
+# Enable block-mount init script if present
+if [ -x /etc/init.d/fstab ]; then
+  /etc/init.d/fstab enable || true
+fi
+
+# Clean up: remove this script (uci-defaults files are removed after execution, but keep safe)
+[ -f /etc/uci-defaults/10_enable_extroot ] && rm -f /etc/uci-defaults/10_enable_extroot || true
+
+echo "enable_extroot: done" >> "$LOG"
+
+exit 0
