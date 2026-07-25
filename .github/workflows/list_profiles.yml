@@ -1,0 +1,61 @@
+name: List ImageBuilder Profiles
+
+on:
+  workflow_dispatch:
+    inputs:
+      openwrt_version:
+        description: 'OpenWrt 版本 (例如 22.03.5)'
+        required: true
+        default: '22.03.5'
+      target:
+        description: 'Target (例如 ramips)'
+        required: true
+        default: 'ramips'
+      subtarget:
+        description: 'Subtarget (例如 mt7620)'
+        required: true
+        default: 'mt7620'
+
+jobs:
+  list-profiles:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xz-utils wget tar ca-certificates
+
+      - name: Download ImageBuilder
+        run: |
+          set -euo pipefail
+          OPENWRT_VERSION="${{ github.event.inputs.openwrt_version }}"
+          TARGET="${{ github.event.inputs.target }}"
+          SUBTARGET="${{ github.event.inputs.subtarget }}"
+          IB_NAME="openwrt-imagebuilder-${OPENWRT_VERSION}-${TARGET}-${SUBTARGET}.Linux-x86_64.tar.xz"
+          IB_URL="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${SUBTARGET}/${IB_NAME}"
+          echo "IB_URL=$IB_URL"
+          wget -nv -O ${IB_NAME} ${IB_URL}
+          tar -xJf ${IB_NAME}
+
+      - name: Run make info and save profiles
+        run: |
+          set -euo pipefail
+          IB_DIR=$(find . -maxdepth 1 -type d -name 'openwrt-imagebuilder-*' -print -quit)
+          if [ -z "$IB_DIR" ]; then
+            echo "ImageBuilder directory not found" >&2
+            ls -la || true
+            exit 1
+          fi
+          cd "$IB_DIR"
+          mkdir -p ../out
+          echo "make info output:" > ../out/available_profiles.txt
+          make info >> ../out/available_profiles.txt 2>&1 || true
+
+      - name: Upload profiles artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: available_profiles
+          path: out/available_profiles.txt
