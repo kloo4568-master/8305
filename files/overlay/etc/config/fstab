@@ -1,0 +1,12 @@
+config global
+	option anon_mount '1'
+	option anon_swap '0'
+	option auto '1'
+	option check_fs '0'
+
+config mount
+	option target '/overlay'
+	option device '/dev/disk/by-label/overlay'
+	option fstype 'ext4'
+	option options 'rw,sync'
+	option enabled '1'
