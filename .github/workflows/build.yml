@@ -10,15 +10,15 @@ on:
       target:
         description: 'Target (例如 ramips)'
         required: true
-        default: ''
+        default: 'ramips'
       subtarget:
         description: 'Subtarget (例如 rt305x 或 mt7621)'
         required: true
-        default: ''
+        default: 'mt7620'
       profile:
         description: 'Target profile (设备型号 profile，必须精确)'
         required: true
-        default: ''
+        default: 'zbtlink_wr8305rt'
       packages:
         description: '要包含的包（以空格分隔）'
         required: false
@@ -27,6 +27,9 @@ on:
         description: '是否在成功时创建 GitHub Release (true/false)'
         required: false
         default: 'false'
+  push:
+    branches:
+      - main
 
 jobs:
   build:
@@ -42,14 +45,28 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xz-utils wget tar ca-certificates
 
-      - name: Set variables
+      - name: Set variables (with defaults)
         run: |
-          echo "OPENWRT_VERSION=${{ github.event.inputs.openwrt_version }}" >> $GITHUB_ENV
-          echo "TARGET=${{ github.event.inputs.target }}" >> $GITHUB_ENV
-          echo "SUBTARGET=${{ github.event.inputs.subtarget }}" >> $GITHUB_ENV
-          echo "PROFILE=${{ github.event.inputs.profile }}" >> $GITHUB_ENV
-          echo "PACKAGES='${{ github.event.inputs.packages }}'" >> $GITHUB_ENV
-          echo "CREATE_RELEASE=${{ github.event.inputs.create_release }}" >> $GITHUB_ENV
+          OPENWRT_VERSION="${{ github.event.inputs.openwrt_version }}"
+          TARGET="${{ github.event.inputs.target }}"
+          SUBTARGET="${{ github.event.inputs.subtarget }}"
+          PROFILE="${{ github.event.inputs.profile }}"
+          PACKAGES_INPUT="${{ github.event.inputs.packages }}"
+          CREATE_RELEASE_INPUT="${{ github.event.inputs.create_release }}"
+
+          if [ -z "$OPENWRT_VERSION" ]; then OPENWRT_VERSION="22.03.5"; fi
+          if [ -z "$TARGET" ]; then TARGET="ramips"; fi
+          if [ -z "$SUBTARGET" ]; then SUBTARGET="mt7620"; fi
+          if [ -z "$PROFILE" ]; then PROFILE="zbtlink_wr8305rt"; fi
+          if [ -z "$PACKAGES_INPUT" ]; then PACKAGES_INPUT='kmod-usb-core kmod-usb2 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat block-mount mount-utils'; fi
+          if [ -z "$CREATE_RELEASE_INPUT" ]; then CREATE_RELEASE_INPUT='false'; fi
+
+          echo "OPENWRT_VERSION=$OPENWRT_VERSION" >> $GITHUB_ENV
+          echo "TARGET=$TARGET" >> $GITHUB_ENV
+          echo "SUBTARGET=$SUBTARGET" >> $GITHUB_ENV
+          echo "PROFILE=$PROFILE" >> $GITHUB_ENV
+          echo "PACKAGES=$PACKAGES_INPUT" >> $GITHUB_ENV
+          echo "CREATE_RELEASE=$CREATE_RELEASE_INPUT" >> $GITHUB_ENV
 
       - name: Download ImageBuilder
         run: |
@@ -72,7 +89,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: openwrt-imagebuilder-${{ github.event.inputs.openwrt_version }}-${{ github.event.inputs.target }}-${{ github.event.inputs.subtarget }}-${{ github.event.inputs.profile }}
+          name: openwrt-imagebuilder-${{ env.OPENWRT_VERSION }}-${{ env.TARGET }}-${{ env.SUBTARGET }}-${{ env.PROFILE }}
           path: out
 
       - name: Create release (optional)
