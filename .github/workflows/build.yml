@@ -77,14 +77,27 @@ jobs:
           wget -nv -O ${IB_NAME} ${IB_URL} || (echo "Failed to download ImageBuilder: $IB_URL" && exit 1)
           tar -xJf ${IB_NAME}
 
-      - name: Build image
-        working-directory: ./openwrt-imagebuilder-*
+      - name: Build image (robust lookup)
         run: |
           set -e
-          mkdir -p ../${OUTDIR}
-          # PROFILE 必须精确匹配
+          mkdir -p ${OUTDIR}
+          # Find the extracted ImageBuilder directory (name may vary)
+          IB_DIR=$(ls -d openwrt-imagebuilder-* 2>/dev/null || true)
+          if [ -z "$IB_DIR" ]; then
+            # Try to detect by listing directories
+            IB_DIR=$(find . -maxdepth 1 -type d -name 'openwrt-imagebuilder-*' -print -quit || true)
+          fi
+          if [ -z "$IB_DIR" ]; then
+            echo "ImageBuilder directory not found after extraction." >&2
+            echo "Available files:" >&2
+            ls -la || true
+            exit 1
+          fi
+          echo "Using ImageBuilder dir: $IB_DIR"
+          cd "$IB_DIR"
+          # Build image. PROFILE 必须精确匹配
           make image PROFILE="${PROFILE}" PACKAGES="${PACKAGES}" FILES="../files" || (echo "make image failed" && exit 1)
-          cp -v -r bin/targets/*/* ../../${OUTDIR}/ || true
+          cp -v -r bin/targets/*/* ../${OUTDIR}/ || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
