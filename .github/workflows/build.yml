@@ -16,9 +16,9 @@ on:
         required: true
         default: 'mt7620'
       profile:
-        description: 'Target profile (设备型号 profile，必须精确)'
-        required: true
-        default: 'zbtlink_wr8305rt'
+        description: 'Target profile (设备型号 profile，优先使用该值；若留空则使用仓库默认)'
+        required: false
+        default: ''
       packages:
         description: '要包含的包（以空格分隔）'
         required: false
@@ -57,7 +57,8 @@ jobs:
           if [ -z "$OPENWRT_VERSION" ]; then OPENWRT_VERSION="22.03.5"; fi
           if [ -z "$TARGET" ]; then TARGET="ramips"; fi
           if [ -z "$SUBTARGET" ]; then SUBTARGET="mt7620"; fi
-          if [ -z "$PROFILE" ]; then PROFILE="zbtlink_wr8305rt"; fi
+          # If no profile was provided, fall back to the known-good profile for WR8305RT
+          if [ -z "$PROFILE" ]; then PROFILE="zbtlink_zbt-wr8305rt"; fi
           if [ -z "$PACKAGES_INPUT" ]; then PACKAGES_INPUT='kmod-usb-core kmod-usb2 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat block-mount mount-utils'; fi
           if [ -z "$CREATE_RELEASE_INPUT" ]; then CREATE_RELEASE_INPUT='false'; fi
 
