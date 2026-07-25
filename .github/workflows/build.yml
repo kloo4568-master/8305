@@ -68,34 +68,59 @@ jobs:
           echo "PACKAGES=$PACKAGES_INPUT" >> $GITHUB_ENV
           echo "CREATE_RELEASE=$CREATE_RELEASE_INPUT" >> $GITHUB_ENV
 
-      - name: Download ImageBuilder
+      - name: Download ImageBuilder (with debug)
         run: |
-          set -e
+          set -euo pipefail
           IB_NAME="openwrt-imagebuilder-${OPENWRT_VERSION}-${TARGET}-${SUBTARGET}.Linux-x86_64.tar.xz"
           IB_URL="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${SUBTARGET}/${IB_NAME}"
-          echo "Trying to download $IB_URL"
-          wget -nv -O ${IB_NAME} ${IB_URL} || (echo "Failed to download ImageBuilder: $IB_URL" && exit 1)
-          tar -xJf ${IB_NAME}
+          echo "[debug] IB_NAME=$IB_NAME"
+          echo "[debug] IB_URL=$IB_URL"
+          echo "[debug] pwd=$(pwd)"
+          echo "[debug] ls before download:"
+          ls -la || true
 
-      - name: Build image (robust lookup)
+          echo "Trying to download $IB_URL"
+          # show http response headers if any problem
+          wget -S --tries=3 -O ${IB_NAME} ${IB_URL} || (echo "Failed to download ImageBuilder: $IB_URL" && exit 1)
+
+          echo "[debug] downloaded file size:" 
+          ls -lh ${IB_NAME} || true
+
+          echo "[debug] listing tar contents (first 50 entries)"
+          tar -tf ${IB_NAME} | head -n 50 || true
+
+          echo "Extracting archive"
+          tar -xJf ${IB_NAME}
+          echo "[debug] ls after extract:"
+          ls -la || true
+
+      - name: Build image (robust lookup with debug)
         run: |
-          set -e
+          set -euo pipefail
           mkdir -p ${OUTDIR}
+          echo "[debug] pwd=$(pwd)"
+          echo "[debug] list current dir:"
+          ls -la || true
+
           # Find the extracted ImageBuilder directory (name may vary)
-          IB_DIR=$(ls -d openwrt-imagebuilder-* 2>/dev/null || true)
-          if [ -z "$IB_DIR" ]; then
-            # Try to detect by listing directories
-            IB_DIR=$(find . -maxdepth 1 -type d -name 'openwrt-imagebuilder-*' -print -quit || true)
-          fi
+          IB_DIR=$(find . -maxdepth 1 -type d -name 'openwrt-imagebuilder-*' -print -quit || true)
+          echo "[debug] found IB_DIR=$IB_DIR"
           if [ -z "$IB_DIR" ]; then
             echo "ImageBuilder directory not found after extraction." >&2
             echo "Available files:" >&2
             ls -la || true
             exit 1
           fi
+
           echo "Using ImageBuilder dir: $IB_DIR"
           cd "$IB_DIR"
+
+          echo "[debug] inside IB_DIR pwd=$(pwd)"
+          echo "[debug] list IB_DIR:"
+          ls -la || true
+
           # Build image. PROFILE 必须精确匹配
+          echo "Running: make image PROFILE=\"${PROFILE}\" PACKAGES=\"${PACKAGES}\" FILES=\"../files\""
           make image PROFILE="${PROFILE}" PACKAGES="${PACKAGES}" FILES="../files" || (echo "make image failed" && exit 1)
           cp -v -r bin/targets/*/* ../${OUTDIR}/ || true
 
