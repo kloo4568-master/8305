@@ -1,77 +1,134 @@
 #!/bin/bash
 set -euo pipefail
 
-OPENWRT_VERSION=${1:-22.03.5}
-TARGET=${2:-}
-SUBTARGET=${3:-}
-PROFILE=${4:-}
-PACKAGES=${5:-"kmod-usb-core kmod-usb2 kmod-usb3 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat block-mount mount-utils e2fsprogs"}
+# WR8305RT ImageBuilder build script
+# Target:
+#   Device: ZBT-WR8305RT
+#   CPU: MT7620A
+#   OpenWrt: 22.03.7
+#   Target: ramips/mt7620
 
-if [ -z "$TARGET" ] || [ -z "$SUBTARGET" ] || [ -z "$PROFILE" ]; then
-  echo "Usage: $0 <openwrt-version> <target> <subtarget> <profile> [packages]"
-  exit 2
+
+OPENWRT_VERSION=${1:-22.03.7}
+TARGET=${2:-ramips}
+SUBTARGET=${3:-mt7620}
+PROFILE=${4:-zbtlink_zbt-wr8305rt}
+
+
+PACKAGES=${5:-"
+kmod-usb-core
+kmod-usb2
+kmod-usb-storage
+kmod-scsi-core
+kmod-fs-ext4
+block-mount
+e2fsprogs
+e2fsprogs-extra
+"}
+
+
+echo "================================="
+echo "OpenWrt ImageBuilder"
+echo "Version : $OPENWRT_VERSION"
+echo "Target  : $TARGET"
+echo "Sub     : $SUBTARGET"
+echo "Profile : $PROFILE"
+echo "================================="
+
+
+# 检查 files
+
+if [ ! -f "../files/etc/config/fstab" ]; then
+    echo "ERROR: missing files/etc/config/fstab"
+    exit 1
 fi
+
+
+if [ ! -f "../files/etc/uci-defaults/99-extroot" ]; then
+    echo "WARNING: missing 99-extroot"
+fi
+
+
 
 IB_NAME="openwrt-imagebuilder-${OPENWRT_VERSION}-${TARGET}-${SUBTARGET}.Linux-x86_64.tar.xz"
+
 IB_URL="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${SUBTARGET}/${IB_NAME}"
 
-echo "Downloading $IB_URL"
-wget -nv -O "${IB_NAME}" "${IB_URL}"
 
-# Clean previous extracted imagebuilder directories only (do not remove the downloaded tar)
-# Use find to remove directories only to avoid deleting the downloaded tarfile
-find . -maxdepth 1 -type d -name 'openwrt-imagebuilder-*' -exec rm -rf {} + || true
-rm -f "${IB_NAME}".part || true
+echo "Downloading ImageBuilder:"
+echo "$IB_URL"
 
-# Extract imagebuilder archive
-if [ ! -f "${IB_NAME}" ]; then
-  echo "Error: ${IB_NAME} not found after download" >&2
-  exit 1
+
+
+# 清理旧文件
+
+rm -rf openwrt-imagebuilder-* || true
+rm -f "$IB_NAME" || true
+
+
+
+wget -nv \
+    -O "$IB_NAME" \
+    "$IB_URL"
+
+
+
+echo "Extracting..."
+
+tar -xJf "$IB_NAME"
+
+
+
+IB_DIR=$(find . \
+    -maxdepth 1 \
+    -type d \
+    -name "openwrt-imagebuilder-*" \
+    -print -quit)
+
+
+if [ -z "$IB_DIR" ]; then
+    echo "ERROR: ImageBuilder directory not found"
+    exit 1
 fi
 
-tar -xJf "${IB_NAME}"
 
-# Find the extracted imagebuilder directory safely
-EXTRACT_DIR=$(find . -maxdepth 1 -type d -name 'openwrt-imagebuilder-*' -print -quit || true)
-if [ -z "$EXTRACT_DIR" ]; then
-  echo "Error: extracted imagebuilder directory not found" >&2
-  ls -la || true
-  exit 1
-fi
 
-# Normalize and cd
-EXTRACT_DIR=${EXTRACT_DIR#./}
-cd "$EXTRACT_DIR"
+cd "$IB_DIR"
 
-# If PACKAGES is empty, fall back to default
-if [ -z "${PACKAGES}" ]; then
-  PACKAGES="kmod-usb-core kmod-usb2 kmod-usb3 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat block-mount mount-utils e2fsprogs"
-fi
 
-# Pre-check available packages and filter out missing ones to avoid hard failure
-AVAILABLE=""
-if find dl -type f -name 'Packages*' -print0 | read -r -d '' _ 2>/dev/null; then
-  AVAILABLE=$(find dl -type f -name 'Packages*' -print0 2>/dev/null | xargs -0 zcat 2>/dev/null || true)
-  AVAILABLE=$(printf "%s" "$AVAILABLE" | awk '/^Package: /{print $2}' | sort -u || true)
-fi
 
-if [ -n "$AVAILABLE" ]; then
-  FILTERED=""
-  for p in $PACKAGES; do
-    if printf "%s" "$AVAILABLE" | grep -qx "$p"; then
-      FILTERED="$FILTERED $p"
-    else
-      echo "Warning: package '$p' not found in imagebuilder feeds — skipping"
-    fi
-  done
-  PACKAGES="${FILTERED## }"
-else
-  echo "Warning: could not read available package lists from dl/; proceeding with PACKAGES unfiltered"
-fi
+echo "Checking profile..."
 
-echo "Running make image with PACKAGES: $PACKAGES"
-make image PROFILE="${PROFILE}" PACKAGES="$PACKAGES" FILES="../files"
+make info | grep "$PROFILE" || {
+    echo "ERROR: profile not found:"
+    echo "$PROFILE"
+    exit 1
+}
+
+
+
+echo "Building firmware..."
+
+make image \
+    PROFILE="$PROFILE" \
+    PACKAGES="$PACKAGES" \
+    FILES="../files"
+
+
+
+echo "Collect firmware..."
+
 mkdir -p ../out
-cp -r bin/targets/*/* ../out/ || true
 
-echo "Done. Artifacts in ../out"
+
+cp -rv \
+    bin/targets/*/* \
+    ../out/
+
+
+
+echo "================================="
+echo "Build finished"
+echo "Output:"
+ls -lh ../out
+echo "================================="
