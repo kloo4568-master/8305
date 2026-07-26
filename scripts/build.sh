@@ -5,7 +5,7 @@ OPENWRT_VERSION=${1:-22.03.5}
 TARGET=${2:-}
 SUBTARGET=${3:-}
 PROFILE=${4:-}
-PACKAGES=${5:-"kmod-usb-core kmod-usb2 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat block-mount mount-utils"}
+PACKAGES=${5:-"kmod-usb-core kmod-usb2 kmod-usb3 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat block-mount mount-utils e2fsprogs"}
 
 if [ -z "$TARGET" ] || [ -z "$SUBTARGET" ] || [ -z "$PROFILE" ]; then
   echo "Usage: $0 <openwrt-version> <target> <subtarget> <profile> [packages]"
