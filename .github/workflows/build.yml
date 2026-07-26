@@ -27,6 +27,10 @@ on:
         description: '是否在成功时创建 GitHub Release (true/false)'
         required: false
         default: 'false'
+      strict_packages:
+        description: '当为 true 时，若镜像缺少任何必需包则使构建失败'
+        required: false
+        default: 'true'
   push:
     branches:
       - main
@@ -39,6 +43,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Node (ensure supported Node available for JS actions)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
 
       - name: Install deps
         run: |
@@ -53,6 +62,7 @@ jobs:
           PROFILE="${{ github.event.inputs.profile }}"
           PACKAGES_INPUT="${{ github.event.inputs.packages }}"
           CREATE_RELEASE_INPUT="${{ github.event.inputs.create_release }}"
+          STRICT_PACKAGES_INPUT="${{ github.event.inputs.strict_packages }}"
 
           if [ -z "$OPENWRT_VERSION" ]; then OPENWRT_VERSION="22.03.5"; fi
           if [ -z "$TARGET" ]; then TARGET="ramips"; fi
@@ -61,6 +71,7 @@ jobs:
           if [ -z "$PROFILE" ]; then PROFILE="zbtlink_zbt-wr8305rt"; fi
           if [ -z "$PACKAGES_INPUT" ]; then PACKAGES_INPUT='kmod-usb-core kmod-usb2 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat block-mount mount-utils'; fi
           if [ -z "$CREATE_RELEASE_INPUT" ]; then CREATE_RELEASE_INPUT='false'; fi
+          if [ -z "$STRICT_PACKAGES_INPUT" ]; then STRICT_PACKAGES_INPUT='true'; fi
 
           echo "OPENWRT_VERSION=$OPENWRT_VERSION" >> $GITHUB_ENV
           echo "TARGET=$TARGET" >> $GITHUB_ENV
@@ -68,6 +79,7 @@ jobs:
           echo "PROFILE=$PROFILE" >> $GITHUB_ENV
           echo "PACKAGES=$PACKAGES_INPUT" >> $GITHUB_ENV
           echo "CREATE_RELEASE=$CREATE_RELEASE_INPUT" >> $GITHUB_ENV
+          echo "STRICT_PACKAGES=$STRICT_PACKAGES_INPUT" >> $GITHUB_ENV
 
       - name: Download ImageBuilder (with debug)
         run: |
@@ -82,23 +94,23 @@ jobs:
 
           echo "Trying to download $IB_URL"
           # show http response headers if any problem
-          wget -S --tries=3 -O ${IB_NAME} ${IB_URL} || (echo "Failed to download ImageBuilder: $IB_URL" && exit 1)
+          wget -S --tries=3 -O "${IB_NAME}" "${IB_URL}" || (echo "Failed to download ImageBuilder: $IB_URL" && exit 1)
 
           echo "[debug] downloaded file size:" 
-          ls -lh ${IB_NAME} || true
+          ls -lh "${IB_NAME}" || true
 
           echo "[debug] listing tar contents (first 50 entries)"
-          tar -tf ${IB_NAME} | head -n 50 || true
+          tar -tf "${IB_NAME}" | head -n 50 || true
 
           echo "Extracting archive"
-          tar -xJf ${IB_NAME}
+          tar -xJf "${IB_NAME}"
           echo "[debug] ls after extract:"
           ls -la || true
 
       - name: Build image (robust lookup with debug)
         run: |
           set -euo pipefail
-          mkdir -p ${OUTDIR}
+          mkdir -p "${OUTDIR}"
           echo "[debug] pwd=$(pwd)"
           echo "[debug] list current dir:"
           ls -la || true
@@ -120,10 +132,53 @@ jobs:
           echo "[debug] list IB_DIR:"
           ls -la || true
 
+          # Profile existence check (if profiles.json exists, ensure PROFILE is present)
+          if [ -f profiles.json ]; then
+            if ! grep -q "${PROFILE}" profiles.json; then
+              echo "Error: PROFILE '${PROFILE}' not found in extracted imagebuilder profiles (profiles.json)" >&2
+              echo "Available profiles (excerpt):" >&2
+              head -n 100 profiles.json || true
+              exit 1
+            fi
+          fi
+
           # Build image. PROFILE 必须精确匹配
           echo "Running: make image PROFILE=\"${PROFILE}\" PACKAGES=\"${PACKAGES}\" FILES=\"../files\""
           make image PROFILE="${PROFILE}" PACKAGES="${PACKAGES}" FILES="../files" || (echo "make image failed" && exit 1)
           cp -v -r bin/targets/*/* ../${OUTDIR}/ || true
+
+      - name: Verify baseline manifest contains required packages
+        if: always()
+        run: |
+          set -euo pipefail
+          # require PACKAGES to exist in the manifest (use PACKAGES from env)
+          REQUIRED="$PACKAGES"
+          MANIFEST_FILE=$(ls -1 out/*.manifest 2>/dev/null | head -n1 || true)
+          if [ -z "$MANIFEST_FILE" ]; then
+            echo "Warning: no manifest file found in out/; cannot verify packages"
+            if [ "$STRICT_PACKAGES" = 'true' ]; then
+              echo "STRICT_PACKAGES=true and manifest missing -> failing" >&2
+              exit 1
+            else
+              exit 0
+            fi
+          fi
+
+          echo "Checking manifest: $MANIFEST_FILE"
+          for p in $REQUIRED; do
+            if ! grep -qi "$p" "$MANIFEST_FILE"; then
+              echo "Missing package in manifest: $p"
+              MISSING=1
+            fi
+          done
+          if [ "${MISSING:-0}" -eq 1 ]; then
+            if [ "$STRICT_PACKAGES" = 'true' ]; then
+              echo "One or more required packages missing in manifest and STRICT_PACKAGES=true -> failing" >&2
+              exit 1
+            else
+              echo "Warning: required packages missing, but continuing because STRICT_PACKAGES is false"
+            fi
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
