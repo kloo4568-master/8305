@@ -1,82 +1,140 @@
 #!/bin/sh
 # /etc/uci-defaults/10_enable_extroot
-# This script runs once on first boot. It attempts to mount two USB partitions:
-# 1. overlay partition (3.6G) to /overlay
-# 2. data partition (3.6G) to /data
-# Both partitions are ext4 formatted and labeled accordingly
+# Enhanced script: waits for labeled partitions, mounts overlay and data (ext4), copies contents if needed,
+# ensures fstab entries exist and are enabled, and enables block-mount service.
 
 set -e
 
 LOG=/tmp/enable_extroot.log
 echo "enable_extroot: starting" > "$LOG"
 
-# wait a short time for disks to settle
-sleep 2
-
-# Function to mount and setup a partition
-mount_partition() {
-	local label=$1
-	local target=$2
-	local partition_size=$3
-	
-	echo "enable_extroot: processing $label partition for $target" >> "$LOG"
-	
-	if [ ! -e /dev/disk/by-label/$label ]; then
-		echo "enable_extroot: no /dev/disk/by-label/$label found" >> "$LOG"
-		return 1
-	fi
-	
-	local MNT=/mnt/${label}_tmp
-	mkdir -p "$MNT"
-	
-	if mount /dev/disk/by-label/$label "$MNT"; then
-		echo "enable_extroot: mounted $label partition to $MNT" >> "$LOG"
-		
-		# If the target is empty (new), copy existing contents if applicable
-		if [ -d "$target" ] && [ -z "$(ls -A "$MNT" 2>/dev/null)" ]; then
-			echo "enable_extroot: copying current $target contents to USB $label partition" >> "$LOG"
-			# Use tar to preserve permissions
-			tar -C "$target" -cf - . | tar -C "$MNT" -xf - || true
-		fi
-		
-		umount "$MNT" || true
-		rmdir "$MNT" || true
-		return 0
-	else
-		echo "enable_extroot: failed to mount $label partition" >> "$LOG"
-		rmdir "$MNT" || true
-		return 1
-	fi
+wait_for_label() {
+    label="$1"
+    timeout=${2:-30}
+    waited=0
+    echo "enable_extroot: waiting for /dev/disk/by-label/$label (timeout ${timeout}s)" >> "$LOG"
+    while [ $waited -lt $timeout ]; do
+        if [ -e "/dev/disk/by-label/$label" ]; then
+            echo "enable_extroot: found /dev/disk/by-label/$label" >> "$LOG"
+            return 0
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    echo "enable_extroot: timeout waiting for /dev/disk/by-label/$label" >> "$LOG"
+    return 1
 }
 
-# Mount overlay partition (3.6G ext4)
-mount_partition "overlay" "/overlay" "3.6G"
+mount_and_copy() {
+    label="$1"
+    target="$2"
 
-# Mount data partition (3.6G ext4)
-mount_partition "data" "/data" "3.6G"
+    if ! wait_for_label "$label" 30; then
+        return 1
+    fi
 
-# Enable both fstab entries
+    dev="/dev/disk/by-label/$label"
+    MNT="/mnt/${label}_tmp"
+    mkdir -p "$MNT"
+    mkdir -p "$target"
+
+    if mount "$dev" "$MNT"; then
+        echo "enable_extroot: mounted $dev to $MNT" >> "$LOG"
+
+        # If target has files and MNT is empty, copy contents from target to MNT
+        if [ -d "$target" ] && [ -z "$(ls -A "$MNT" 2>/dev/null)" ]; then
+            echo "enable_extroot: copying current $target contents to USB $label partition" >> "$LOG"
+            if command -v tar >/dev/null 2>&1; then
+                tar -C "$target" -cf - . | tar -C "$MNT" -xf - || true
+            else
+                # fallback to cp -a if tar not available
+                cp -a "$target/." "$MNT/" || true
+            fi
+        fi
+
+        umount "$MNT" || true
+        rmdir "$MNT" || true
+        return 0
+    else
+        echo "enable_extroot: failed to mount $dev" >> "$LOG"
+        rmdir "$MNT" || true
+        return 1
+    fi
+}
+
+ensure_fstab_entry() {
+    device="$1"
+    target="$2"
+    fstype="$3"
+    options="$4"
+
+    # Try to find existing entry by device or target
+    idx=$(uci show fstab 2>/dev/null | sed -n "s/^fstab.\(@mount\[[0-9]\+\]\).*=\(.*\)/\1/p" | sed -n 's/.*@mount\[\([0-9]\+\)\].*/\1/p' | head -n 0)
+    # Better approach: iterate mounts and match device or target
+    found_index=""
+    i=0
+    while uci show fstab.@mount[$i] >/dev/null 2>&1; do
+        eval_dev=$(uci get fstab.@mount[$i].device 2>/dev/null || true)
+        eval_target=$(uci get fstab.@mount[$i].target 2>/dev/null || true)
+        if [ "$eval_dev" = "$device" ] || [ "$eval_target" = "$target" ]; then
+            found_index="$i"
+            break
+        fi
+        i=$((i + 1))
+    done
+
+    if [ -n "$found_index" ]; then
+        echo "enable_extroot: found existing fstab entry at index $found_index, enabling" >> "$LOG"
+        uci set fstab.@mount[$found_index].enabled='1' || true
+    else
+        echo "enable_extroot: adding new fstab entry for $device -> $target" >> "$LOG"
+        uci add fstab mount || true
+        # set fields on last entry
+        uci set fstab.@mount[-1].target="$target" || true
+        uci set fstab.@mount[-1].device="$device" || true
+        uci set fstab.@mount[-1].fstype="$fstype" || true
+        uci set fstab.@mount[-1].options="$options" || true
+        uci set fstab.@mount[-1].enabled='1' || true
+    fi
+}
+
+# Process overlay first (required for persistent config)
+overlay_ok=0
+if mount_and_copy "overlay" "/overlay"; then
+    overlay_ok=1
+else
+    echo "enable_extroot: overlay mount failed or not present" >> "$LOG"
+fi
+
+# Process data partition
+data_ok=0
+if mount_and_copy "data" "/data"; then
+    data_ok=1
+else
+    echo "enable_extroot: data mount failed or not present" >> "$LOG"
+fi
+
+# Ensure fstab entries exist and are enabled
 if command -v uci >/dev/null 2>&1; then
-	echo "enable_extroot: enabling fstab entries" >> "$LOG"
-	
-	# Enable overlay mount
-	uci set fstab.@mount[0].enabled='1' || true
-	
-	# Enable data mount (second mount point)
-	uci set fstab.@mount[1].enabled='1' || true
-	
-	uci commit fstab || true
+    ensure_fstab_entry "/dev/disk/by-label/overlay" "/overlay" "ext4" "rw,sync"
+    ensure_fstab_entry "/dev/disk/by-label/data" "/data" "ext4" "rw,sync"
+    uci commit fstab || true
 fi
 
 # Enable block-mount init script if present
 if [ -x /etc/init.d/fstab ]; then
-	/etc/init.d/fstab enable || true
-	echo "enable_extroot: enabled block-mount service" >> "$LOG"
+    /etc/init.d/fstab enable || true
+    echo "enable_extroot: enabled block-mount service" >> "$LOG"
 fi
 
-# Clean up: remove this script (uci-defaults files are removed after execution, but keep safe)
-[ -f /etc/uci-defaults/10_enable_extroot ] && rm -f /etc/uci-defaults/10_enable_extroot || true
+# Remove this script only if overlay was successfully processed (so we won't remove before core persistence works)
+if [ "$overlay_ok" -eq 1 ]; then
+    [ -f /etc/uci-defaults/10_enable_extroot ] && rm -f /etc/uci-defaults/10_enable_extroot || true
+    echo "enable_extroot: removed self after successful overlay setup" >> "$LOG"
+else
+    echo "enable_extroot: not removing self because overlay setup failed; will retry on next boot if present" >> "$LOG"
+fi
 
-echo "enable_extroot: done" >> "$LOG"
+echo "enable_extroot: done (overlay_ok=$overlay_ok, data_ok=$data_ok)" >> "$LOG"
 
 exit 0
