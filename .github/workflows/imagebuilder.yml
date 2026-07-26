@@ -25,134 +25,127 @@ on:
 
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
 
-    env:
-      BASE_PACKAGES: >
-        kmod-usb-core
-        kmod-usb2
-        kmod-usb-storage
-        kmod-scsi-core
-        kmod-fs-ext4
-        block-mount
-        e2fsprogs
-        e2fsprogs-extra
+  build:
+
+    runs-on: ubuntu-latest
 
 
     steps:
 
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
 
-    - name: Install build tools
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          wget \
-          xz-utils \
-          tar \
-          ca-certificates
+      - name: Install tools
+        run: |
+          sudo apt update
+          sudo apt install -y wget tar xz-utils
 
 
-    - name: Check files directory
-      run: |
-        echo "Checking custom files..."
+      - name: Set variables
+        run: |
 
-        if [ -f files/etc/config/fstab ]; then
-          echo "OK: fstab found"
-        else
-          echo "ERROR: files/etc/config/fstab missing"
-          exit 1
-        fi
+          echo "OPENWRT_VERSION=${{ github.event.inputs.openwrt_version }}" >> $GITHUB_ENV
+          echo "TARGET=${{ github.event.inputs.target }}" >> $GITHUB_ENV
+          echo "SUBTARGET=${{ github.event.inputs.subtarget }}" >> $GITHUB_ENV
+          echo "PROFILE=${{ github.event.inputs.profile }}" >> $GITHUB_ENV
 
 
-        if [ -f files/etc/uci-defaults/99-extroot ]; then
-          echo "OK: 99-extroot found"
-        else
-          echo "WARNING: 99-extroot missing"
-        fi
+      - name: Check extroot file
+        run: |
+
+          if [ ! -f files/etc/uci-defaults/99-extroot ]; then
+            echo "99-extroot missing"
+            exit 1
+          fi
+
+          ls -l files/etc/uci-defaults/
 
 
-        echo "Files tree:"
-        find files -type f
+      - name: Download ImageBuilder
+        run: |
+
+          IB_NAME="openwrt-imagebuilder-${OPENWRT_VERSION}-${TARGET}-${SUBTARGET}.Linux-x86_64.tar.xz"
+
+          URL="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${SUBTARGET}/${IB_NAME}"
 
 
-    - name: Download ImageBuilder
-      run: |
-        set -e
-
-        VERSION="${{ inputs.openwrt_version }}"
-        TARGET="${{ inputs.target }}"
-        SUBTARGET="${{ inputs.subtarget }}"
-
-        IB_NAME="openwrt-imagebuilder-${VERSION}-${TARGET}-${SUBTARGET}.Linux-x86_64.tar.xz"
-
-        URL="https://downloads.openwrt.org/releases/${VERSION}/targets/${TARGET}/${SUBTARGET}/${IB_NAME}"
-
-        echo "Downloading:"
-        echo "$URL"
+          echo "Downloading:"
+          echo "$URL"
 
 
-        wget -nv -O "$IB_NAME" "$URL"
+          wget -O "$IB_NAME" "$URL"
 
 
-        tar -xJf "$IB_NAME"
+          tar -xJf "$IB_NAME"
 
 
-        IB_DIR=$(find . -maxdepth 1 \
+
+      - name: Find ImageBuilder
+        run: |
+
+          IB_DIR=$(find . -maxdepth 1 \
           -type d \
           -name "openwrt-imagebuilder-*" \
-          -print -quit)
+          | head -n1)
 
 
-        if [ -z "$IB_DIR" ]; then
-          echo "ImageBuilder not found"
-          exit 1
-        fi
+          if [ -z "$IB_DIR" ]; then
+            echo "ImageBuilder not found"
+            exit 1
+          fi
 
 
-        echo "IB_DIR=$IB_DIR" >> $GITHUB_ENV
-
-
-
-    - name="Build firmware"
-      run: |
-        set -e
-
-        cd "$IB_DIR"
-
-
-        echo "Checking profile..."
-
-        make info | grep -i zbt || true
-
-
-        echo "Building..."
-
-        make image \
-          PROFILE="${{ inputs.profile }}" \
-          PACKAGES="$BASE_PACKAGES" \
-          FILES="../files"
-
-
-    - name="Collect firmware"
-      run: |
-        mkdir -p out
-
-        cp -r \
-        "$IB_DIR/bin/targets/"*/* \
-        out/
-
-
-        echo "Firmware files:"
-        ls -lh out
+          echo "IB_DIR=$IB_DIR" >> $GITHUB_ENV
 
 
 
-    - name="Upload firmware"
-      uses: actions/upload-artifact@v4
-      with:
-        name: WR8305RT-OpenWrt-extroot
-        path: out/
+      - name: Check profile
+        run: |
+
+          cd "$IB_DIR"
+
+          make info | grep zbt
+
+
+
+      - name: Build firmware
+        run: |
+
+          cd "$IB_DIR"
+
+
+          PACKAGES="kmod-usb-core kmod-usb2 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat block-mount mount-utils"
+
+
+          make image \
+            PROFILE="${PROFILE}" \
+            PACKAGES="${PACKAGES}" \
+            FILES="../files"
+
+
+
+      - name: Collect firmware
+        run: |
+
+          mkdir -p output
+
+
+          cp -rv \
+          "$IB_DIR"/bin/targets/*/* \
+          output/
+
+
+          ls -lh output
+
+
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+
+        with:
+
+          name: WR8305RT-OpenWrt-ImageBuilder
+
+          path: output
