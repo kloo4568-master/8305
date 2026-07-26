@@ -18,8 +18,12 @@ IB_URL="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARG
 echo "Downloading $IB_URL"
 wget -nv -O ${IB_NAME} ${IB_URL}
 
-# Clean previous extracted imagebuilder dirs to avoid multiple matches
-rm -rf openwrt-imagebuilder-* || true
+# Clean previous extracted imagebuilder directories only (do not remove the downloaded tar)
+for d in openwrt-imagebuilder-*/; do
+  if [ -d "$d" ]; then
+    rm -rf "$d" || true
+  fi
+done
 
 # Extract imagebuilder archive
 tar -xJf ${IB_NAME}
