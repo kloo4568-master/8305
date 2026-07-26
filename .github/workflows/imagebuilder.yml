@@ -4,129 +4,155 @@ on:
   workflow_dispatch:
     inputs:
       openwrt_version:
-        description: 'OpenWrt version to use (e.g. 22.03.5)'
+        description: 'OpenWrt version'
         required: true
-        default: '22.03.5'
+        default: '22.03.7'
+
       target:
-        description: 'Imagebuilder target (e.g. ath79, ramips)'
+        description: 'Target'
         required: true
-        default: ''
+        default: 'ramips'
+
       subtarget:
-        description: 'Imagebuilder subtarget (board family)'
+        description: 'Subtarget'
         required: true
-        default: ''
+        default: 'mt7620'
+
       profile:
-        description: 'Profile name to build (device profile)'
+        description: 'Device profile'
         required: true
-        default: ''
+        default: 'zbtlink_zbt-wr8305rt'
+
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     env:
-      BASE_PACKAGES: "kmod-usb-core kmod-usb2 kmod-usb3 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat block-mount mount-utils e2fsprogs"
-      EXTRA_PACKAGES: "ipset curl ca-certificates"
+      BASE_PACKAGES: >
+        kmod-usb-core
+        kmod-usb2
+        kmod-usb-storage
+        kmod-scsi-core
+        kmod-fs-ext4
+        block-mount
+        e2fsprogs
+        e2fsprogs-extra
+
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
 
-      - name: Show inputs and environment
-        run: |
-          echo "OpenWrt version: ${{ inputs.openwrt_version }}"
-          echo "TARGET: ${{ inputs.target }}"
-          echo "SUBTARGET: ${{ inputs.subtarget }}"
-          echo "PROFILE: ${{ inputs.profile }}"
-          echo "BASE_PACKAGES: $BASE_PACKAGES"
-          echo "EXTRA_PACKAGES: $EXTRA_PACKAGES"
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      - name: Ensure build script is executable
-        run: chmod +x ./scripts/build.sh
 
-      - name: Clean workspace (prevent residual dirs from previous runs)
-        run: |
-          echo "Cleaning workspace..."
-          # remove only directories or files that look like imagebuilder artifacts
-          find . -maxdepth 1 -type d -name 'openwrt-imagebuilder-*' -exec rm -rf {} + || true
-          rm -rf out out_test || true
-          # show current directory listing for debugging
-          ls -la || true
+    - name: Install build tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          wget \
+          xz-utils \
+          tar \
+          ca-certificates
 
-      - name: Baseline build (current PACKAGES)
-        run: |
-          set -euo pipefail
-          ./scripts/build.sh "${{ inputs.openwrt_version }}" "${{ inputs.target }}" "${{ inputs.subtarget }}" "${{ inputs.profile }}"
-          echo "Artifacts:" && ls -lh out || true
 
-      - name: Upload baseline artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: baseline-artifacts
-          path: out/**
+    - name: Check files directory
+      run: |
+        echo "Checking custom files..."
 
-      - name: Cleanup before test build
-        run: |
-          echo "Cleaning workspace before test build..."
-          find . -maxdepth 1 -type d -name 'openwrt-imagebuilder-*' -exec rm -rf {} + || true
-          rm -rf out out_test || true
+        if [ -f files/etc/config/fstab ]; then
+          echo "OK: fstab found"
+        else
+          echo "ERROR: files/etc/config/fstab missing"
+          exit 1
+        fi
 
-      - name: Test build (with extra deps for OpenClash estimation)
-        run: |
-          set -euo pipefail
-          # Download imagebuilder and build with expanded PACKAGES
-          OPENWRT_VERSION="${{ inputs.openwrt_version }}"
-          TARGET="${{ inputs.target }}"
-          SUBTARGET="${{ inputs.subtarget }}"
-          PROFILE="${{ inputs.profile }}"
-          IB_NAME="openwrt-imagebuilder-${OPENWRT_VERSION}-${TARGET}-${SUBTARGET}.Linux-x86_64.tar.xz"
-          IB_URL="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${SUBTARGET}/${IB_NAME}"
-          echo "Downloading $IB_URL"
-          wget -nv -O "${IB_NAME}" "${IB_URL}"
-          tar -xJf "${IB_NAME}"
-          # Find extracted dir safely and cd into it
-          EXTRACT_DIR=$(find . -maxdepth 1 -type d -name 'openwrt-imagebuilder-*' -print -quit || true)
-          if [ -z "${EXTRACT_DIR}" ]; then
-            echo "Error: extracted imagebuilder directory not found" >&2
-            ls -la || true
-            exit 1
-          fi
-          EXTRACT_DIR=${EXTRACT_DIR#./}
-          cd "${EXTRACT_DIR}"
 
-          # Combine base packages with extra ones to estimate size change
-          PACKAGES="$BASE_PACKAGES $EXTRA_PACKAGES"
+        if [ -f files/etc/uci-defaults/99-extroot ]; then
+          echo "OK: 99-extroot found"
+        else
+          echo "WARNING: 99-extroot missing"
+        fi
 
-          # Pre-check available packages and filter out missing ones to avoid hard failure
-          # Build a list of available package names from the imagebuilder dl/Packages files
-          AVAILABLE=$(find dl -type f -name 'Packages*' -print0 2>/dev/null | xargs -0 zcat 2>/dev/null | awk '/^Package: /{print $2}' | sort -u || true)
-          if [ -z "${AVAILABLE}" ]; then
-            echo "Warning: could not read available package lists from dl/; proceeding with PACKAGES unfiltered"
-          else
-            FILTERED=""
-            for p in $PACKAGES; do
-              if echo "$AVAILABLE" | grep -qx "$p"; then
-                FILTERED="$FILTERED $p"
-              else
-                echo "Warning: package '$p' not found in imagebuilder feeds — skipping"
-              fi
-            done
-            PACKAGES="${FILTERED## }"
-          fi
 
-          echo "Final PACKAGES used: $PACKAGES"
+        echo "Files tree:"
+        find files -type f
 
-          echo "Running make image with PACKAGES: $PACKAGES"
-          make image PROFILE="${PROFILE}" PACKAGES="$PACKAGES" FILES="../files"
-          echo "Artifacts:" && ls -lh bin/targets/*/* || true
-          mkdir -p ../../out_test || true
-          cp -r bin/targets/*/* ../../out_test/ || true
 
-      - name: Upload test build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: openclash-test-artifacts
-          path: out_test/**
+    - name: Download ImageBuilder
+      run: |
+        set -e
 
-      - name: List uploaded artifact sizes
-        run: |
-          echo "Baseline artifacts size:" && du -h --max-depth=1 out || true
-          echo "Test build artifacts size:" && du -h --max-depth=1 out_test || true
+        VERSION="${{ inputs.openwrt_version }}"
+        TARGET="${{ inputs.target }}"
+        SUBTARGET="${{ inputs.subtarget }}"
+
+        IB_NAME="openwrt-imagebuilder-${VERSION}-${TARGET}-${SUBTARGET}.Linux-x86_64.tar.xz"
+
+        URL="https://downloads.openwrt.org/releases/${VERSION}/targets/${TARGET}/${SUBTARGET}/${IB_NAME}"
+
+        echo "Downloading:"
+        echo "$URL"
+
+
+        wget -nv -O "$IB_NAME" "$URL"
+
+
+        tar -xJf "$IB_NAME"
+
+
+        IB_DIR=$(find . -maxdepth 1 \
+          -type d \
+          -name "openwrt-imagebuilder-*" \
+          -print -quit)
+
+
+        if [ -z "$IB_DIR" ]; then
+          echo "ImageBuilder not found"
+          exit 1
+        fi
+
+
+        echo "IB_DIR=$IB_DIR" >> $GITHUB_ENV
+
+
+
+    - name="Build firmware"
+      run: |
+        set -e
+
+        cd "$IB_DIR"
+
+
+        echo "Checking profile..."
+
+        make info | grep -i zbt || true
+
+
+        echo "Building..."
+
+        make image \
+          PROFILE="${{ inputs.profile }}" \
+          PACKAGES="$BASE_PACKAGES" \
+          FILES="../files"
+
+
+    - name="Collect firmware"
+      run: |
+        mkdir -p out
+
+        cp -r \
+        "$IB_DIR/bin/targets/"*/* \
+        out/
+
+
+        echo "Firmware files:"
+        ls -lh out
+
+
+
+    - name="Upload firmware"
+      uses: actions/upload-artifact@v4
+      with:
+        name: WR8305RT-OpenWrt-extroot
+        path: out/
