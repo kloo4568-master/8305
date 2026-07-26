@@ -5,6 +5,7 @@ on:
 
 jobs:
   build:
+
     runs-on: ubuntu-latest
 
     env:
@@ -13,29 +14,30 @@ jobs:
       SUBTARGET: "mt7620"
       PROFILE: "zbtlink_zbt-wr8305rt"
 
+
     steps:
 
       - name: Checkout source
         uses: actions/checkout@v4
 
 
-      - name: Install build tools
+      - name: Install tools
         run: |
           sudo apt update
           sudo apt install -y wget tar xz-utils
 
 
-      - name: Check files
+      - name: Check custom files
         run: |
-          echo "Checking custom files..."
+
+          echo "Checking extroot script..."
 
           if [ ! -f files/etc/uci-defaults/99-extroot ]; then
             echo "ERROR: 99-extroot missing"
             exit 1
           fi
 
-          echo "Custom files OK"
-          find files -type f
+          ls -l files/etc/uci-defaults/
 
 
       - name: Download ImageBuilder
@@ -45,19 +47,20 @@ jobs:
 
           URL="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${SUBTARGET}/${IB_NAME}"
 
-          echo "Download:"
-          echo $URL
+
+          echo "Downloading:"
+          echo "$URL"
 
 
           wget -O "$IB_NAME" "$URL"
 
 
-          echo "Extract..."
+          echo "Extracting..."
 
           tar -xJf "$IB_NAME"
 
 
-      - name: Find ImageBuilder
+      - name: Locate ImageBuilder
         run: |
 
           IB_DIR=$(find . -maxdepth 1 \
@@ -75,33 +78,30 @@ jobs:
           echo "IB_DIR=$IB_DIR" >> $GITHUB_ENV
 
 
+      - name: Check profile
+        run: |
+
+          cd "$IB_DIR"
+
+          make info | grep zbt
+
+
       - name: Build firmware
         run: |
 
           cd "$IB_DIR"
 
 
-          echo "Check profile..."
-
-          make info | grep zbt || true
+          echo "Start building WR8305RT"
 
 
-          echo "Building..."
+          PACKAGES="kmod-usb-core kmod-usb2 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat block-mount mount-utils"
 
 
           make image \
-          PROFILE="${PROFILE}" \
-          PACKAGES="
-          kmod-usb-core
-          kmod-usb2
-          kmod-usb-storage
-          kmod-scsi-core
-          kmod-fs-ext4
-          kmod-fs-vfat
-          block-mount
-          mount-utils
-          " \
-          FILES="../files"
+            PROFILE="${PROFILE}" \
+            PACKAGES="${PACKAGES}" \
+            FILES="../files"
 
 
       - name: Collect firmware
@@ -111,11 +111,11 @@ jobs:
 
 
           cp -rv \
-          $IB_DIR/bin/targets/*/* \
+          "$IB_DIR"/bin/targets/*/* \
           output/
 
 
-          echo "Firmware output:"
+          echo "Firmware files:"
           ls -lh output
 
 
@@ -123,5 +123,7 @@ jobs:
         uses: actions/upload-artifact@v4
 
         with:
+
           name: WR8305RT-OpenWrt-22.03.5
+
           path: output
