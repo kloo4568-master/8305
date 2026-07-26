@@ -42,6 +42,15 @@ jobs:
       - name: Ensure build script is executable
         run: chmod +x ./scripts/build.sh
 
+      - name: Clean workspace (prevent residual dirs from previous runs)
+        run: |
+          echo "Cleaning workspace..."
+          # remove only directories or files that look like imagebuilder artifacts
+          find . -maxdepth 1 -type d -name 'openwrt-imagebuilder-*' -exec rm -rf {} + || true
+          rm -rf out out_test || true
+          # show current directory listing for debugging
+          ls -la || true
+
       - name: Baseline build (current PACKAGES)
         run: |
           set -euo pipefail
@@ -56,7 +65,9 @@ jobs:
 
       - name: Cleanup before test build
         run: |
-          rm -rf openwrt-imagebuilder-* out || true
+          echo "Cleaning workspace before test build..."
+          find . -maxdepth 1 -type d -name 'openwrt-imagebuilder-*' -exec rm -rf {} + || true
+          rm -rf out out_test || true
 
       - name: Test build (with extra deps for OpenClash estimation)
         run: |
@@ -69,9 +80,17 @@ jobs:
           IB_NAME="openwrt-imagebuilder-${OPENWRT_VERSION}-${TARGET}-${SUBTARGET}.Linux-x86_64.tar.xz"
           IB_URL="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${SUBTARGET}/${IB_NAME}"
           echo "Downloading $IB_URL"
-          wget -nv -O ${IB_NAME} ${IB_URL}
-          tar -xJf ${IB_NAME}
-          cd openwrt-imagebuilder-*
+          wget -nv -O "${IB_NAME}" "${IB_URL}"
+          tar -xJf "${IB_NAME}"
+          # Find extracted dir safely and cd into it
+          EXTRACT_DIR=$(find . -maxdepth 1 -type d -name 'openwrt-imagebuilder-*' -print -quit || true)
+          if [ -z "${EXTRACT_DIR}" ]; then
+            echo "Error: extracted imagebuilder directory not found" >&2
+            ls -la || true
+            exit 1
+          fi
+          EXTRACT_DIR=${EXTRACT_DIR#./}
+          cd "${EXTRACT_DIR}"
           # Combine base packages with extra ones to estimate size change
           PACKAGES="$BASE_PACKAGES $EXTRA_PACKAGES"
           echo "Running make image with PACKAGES: $PACKAGES"
