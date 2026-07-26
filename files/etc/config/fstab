@@ -8,13 +8,13 @@ config global autoswap
 
 config global mount
 	option auto_mount '1'
-	option delay_root '5'
+	option delay_root '10'
 	option check_fs '0'
 
 
 config mount
 	option target '/overlay'
-	option device '/dev/sda1'
+	option device 'LABEL=overlay'
 	option fstype 'ext4'
 	option options 'rw,noatime'
 	option enabled '1'
@@ -22,7 +22,7 @@ config mount
 
 config mount
 	option target '/mnt/data'
-	option device '/dev/sda5'
+	option device 'LABEL=data'
 	option fstype 'ext4'
 	option options 'rw,noatime'
 	option enabled '1'
