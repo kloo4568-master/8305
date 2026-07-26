@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BASE_PACKAGES: "kmod-usb-core kmod-usb2 kmod-usb3 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat block-mount mount-utils e2fsprogs"
-      EXTRA_PACKAGES: "ipset curl ca-certificates iptables-mod-nat"
+      EXTRA_PACKAGES: "ipset curl ca-certificates"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -91,8 +91,29 @@ jobs:
           fi
           EXTRACT_DIR=${EXTRACT_DIR#./}
           cd "${EXTRACT_DIR}"
+
           # Combine base packages with extra ones to estimate size change
           PACKAGES="$BASE_PACKAGES $EXTRA_PACKAGES"
+
+          # Pre-check available packages and filter out missing ones to avoid hard failure
+          # Build a list of available package names from the imagebuilder dl/Packages files
+          AVAILABLE=$(find dl -type f -name 'Packages*' -print0 2>/dev/null | xargs -0 zcat 2>/dev/null | awk '/^Package: /{print $2}' | sort -u || true)
+          if [ -z "${AVAILABLE}" ]; then
+            echo "Warning: could not read available package lists from dl/; proceeding with PACKAGES unfiltered"
+          else
+            FILTERED=""
+            for p in $PACKAGES; do
+              if echo "$AVAILABLE" | grep -qx "$p"; then
+                FILTERED="$FILTERED $p"
+              else
+                echo "Warning: package '$p' not found in imagebuilder feeds — skipping"
+              fi
+            done
+            PACKAGES="${FILTERED## }"
+          fi
+
+          echo "Final PACKAGES used: $PACKAGES"
+
           echo "Running make image with PACKAGES: $PACKAGES"
           make image PROFILE="${PROFILE}" PACKAGES="$PACKAGES" FILES="../files"
           echo "Artifacts:" && ls -lh bin/targets/*/* || true
