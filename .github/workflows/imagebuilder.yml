@@ -1,0 +1,92 @@
+name: Imagebuilder CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      openwrt_version:
+        description: 'OpenWrt version to use (e.g. 22.03.5)'
+        required: true
+        default: '22.03.5'
+      target:
+        description: 'Imagebuilder target (e.g. ath79, ramips)'
+        required: true
+        default: ''
+      subtarget:
+        description: 'Imagebuilder subtarget (board family)'
+        required: true
+        default: ''
+      profile:
+        description: 'Profile name to build (device profile)'
+        required: true
+        default: ''
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      BASE_PACKAGES: "kmod-usb-core kmod-usb2 kmod-usb3 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat block-mount mount-utils e2fsprogs"
+      EXTRA_PACKAGES: "ipset curl ca-certificates iptables-mod-nat"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show inputs and environment
+        run: |
+          echo "OpenWrt version: ${{ inputs.openwrt_version }}"
+          echo "TARGET: ${{ inputs.target }}"
+          echo "SUBTARGET: ${{ inputs.subtarget }}"
+          echo "PROFILE: ${{ inputs.profile }}"
+          echo "BASE_PACKAGES: $BASE_PACKAGES"
+          echo "EXTRA_PACKAGES: $EXTRA_PACKAGES"
+
+      - name: Ensure build script is executable
+        run: chmod +x ./scripts/build.sh
+
+      - name: Baseline build (current PACKAGES)
+        run: |
+          set -euo pipefail
+          ./scripts/build.sh "${{ inputs.openwrt_version }}" "${{ inputs.target }}" "${{ inputs.subtarget }}" "${{ inputs.profile }}"
+          echo "Artifacts:" && ls -lh out || true
+
+      - name: Upload baseline artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-artifacts
+          path: out/**
+
+      - name: Cleanup before test build
+        run: |
+          rm -rf openwrt-imagebuilder-* out || true
+
+      - name: Test build (with extra deps for OpenClash estimation)
+        run: |
+          set -euo pipefail
+          # Download imagebuilder and build with expanded PACKAGES
+          OPENWRT_VERSION="${{ inputs.openwrt_version }}"
+          TARGET="${{ inputs.target }}"
+          SUBTARGET="${{ inputs.subtarget }}"
+          PROFILE="${{ inputs.profile }}"
+          IB_NAME="openwrt-imagebuilder-${OPENWRT_VERSION}-${TARGET}-${SUBTARGET}.Linux-x86_64.tar.xz"
+          IB_URL="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${SUBTARGET}/${IB_NAME}"
+          echo "Downloading $IB_URL"
+          wget -nv -O ${IB_NAME} ${IB_URL}
+          tar -xJf ${IB_NAME}
+          cd openwrt-imagebuilder-*
+          # Combine base packages with extra ones to estimate size change
+          PACKAGES="$BASE_PACKAGES $EXTRA_PACKAGES"
+          echo "Running make image with PACKAGES: $PACKAGES"
+          make image PROFILE="${PROFILE}" PACKAGES="$PACKAGES" FILES="../files"
+          echo "Artifacts:" && ls -lh bin/targets/*/* || true
+          mkdir -p ../../out_test || true
+          cp -r bin/targets/*/* ../../out_test/ || true
+
+      - name: Upload test build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: openclash-test-artifacts
+          path: out_test/**
+
+      - name: List uploaded artifact sizes
+        run: |
+          echo "Baseline artifacts size:" && du -h --max-depth=1 out || true
+          echo "Test build artifacts size:" && du -h --max-depth=1 out_test || true
