@@ -1,28 +1,30 @@
 config global automount
-	option from_fstab '1'
-	option anon_mount '1'
+        option from_fstab '1'
+        option anon_mount '1'
 
 config global autoswap
-	option from_fstab '1'
-	option anon_swap '0'
+        option from_fstab '1'
+        option anon_swap '0'
 
 config global mount
-	option auto_mount '1'
-	option delay_root '10'
-	option check_fs '0'
+        option auto_mount '1'
+        option delay_root '5'
+        option check_fs '0'
 
 
+# Extroot overlay
 config mount
-	option target '/overlay'
-	option device 'LABEL=overlay'
-	option fstype 'ext4'
-	option options 'rw,noatime'
-	option enabled '1'
+        option target '/overlay'
+        option uuid 'c7b3111f-27cc-b74a-8918-8f8bf869b8bc'
+        option fstype 'ext4'
+        option options 'rw,noatime'
+        option enabled '1'
 
 
+# Data partition
 config mount
-	option target '/mnt/data'
-	option device 'LABEL=data'
-	option fstype 'ext4'
-	option options 'rw,noatime'
-	option enabled '1'
+        option target '/mnt/data'
+        option uuid 'f2fc6a52-7786-7b41-937e-29aa20827b96'
+        option fstype 'ext4'
+        option options 'rw,noatime'
+        option enabled '1'
