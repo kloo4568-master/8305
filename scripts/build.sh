@@ -17,8 +17,22 @@ IB_URL="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARG
 
 echo "Downloading $IB_URL"
 wget -nv -O ${IB_NAME} ${IB_URL}
+
+# Clean previous extracted imagebuilder dirs to avoid multiple matches
+rm -rf openwrt-imagebuilder-* || true
+
+# Extract imagebuilder archive
 tar -xJf ${IB_NAME}
-cd openwrt-imagebuilder-*
+
+# Enter the first matching extracted directory safely
+shopt -s nullglob
+dirs=(openwrt-imagebuilder-*)
+if [ ${#dirs[@]} -eq 0 ]; then
+  echo "Error: extracted imagebuilder directory not found" >&2
+  exit 1
+fi
+cd "${dirs[0]}"
+
 make image PROFILE="${PROFILE}" PACKAGES="${PACKAGES}" FILES="../files"
 mkdir -p ../out
 cp -r bin/targets/*/* ../out/ || true
