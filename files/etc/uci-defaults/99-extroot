@@ -1,5 +1,20 @@
 #!/bin/sh
 
-/etc/init.d/fstab enable
+# Extroot auto setup
+
+[ -f /etc/config/fstab ] || exit 0
+
+ROOT_UUID="c7b3111f-27cc-b74a-8918-8f8bf869b8bc"
+
+uci -q delete fstab.@mount[0]
+
+uci add fstab mount
+uci set fstab.@mount[-1].target='/overlay'
+uci set fstab.@mount[-1].uuid="$ROOT_UUID"
+uci set fstab.@mount[-1].fstype='ext4'
+uci set fstab.@mount[-1].options='rw,noatime'
+uci set fstab.@mount[-1].enabled='1'
+
+uci commit fstab
 
 exit 0
