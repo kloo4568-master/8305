@@ -3,6 +3,7 @@ name: Imagebuilder CI
 on:
   workflow_dispatch:
     inputs:
+
       openwrt_version:
         description: 'OpenWrt version'
         required: true
@@ -33,14 +34,17 @@ jobs:
 
     steps:
 
+
       - name: Checkout
         uses: actions/checkout@v4
+
 
 
       - name: Install tools
         run: |
           sudo apt update
           sudo apt install -y wget tar xz-utils
+
 
 
       - name: Set variables
@@ -52,6 +56,7 @@ jobs:
           echo "PROFILE=${{ github.event.inputs.profile }}" >> $GITHUB_ENV
 
 
+
       - name: Check extroot file
         run: |
 
@@ -60,7 +65,10 @@ jobs:
             exit 1
           fi
 
+          chmod +x files/etc/uci-defaults/99-extroot
+
           ls -l files/etc/uci-defaults/
+
 
 
       - name: Download ImageBuilder
@@ -71,7 +79,7 @@ jobs:
           URL="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${SUBTARGET}/${IB_NAME}"
 
 
-          echo "Downloading:"
+          echo "Download:"
           echo "$URL"
 
 
@@ -85,7 +93,8 @@ jobs:
       - name: Find ImageBuilder
         run: |
 
-          IB_DIR=$(find . -maxdepth 1 \
+          IB_DIR=$(find . \
+          -maxdepth 1 \
           -type d \
           -name "openwrt-imagebuilder-*" \
           | head -n1)
@@ -100,13 +109,17 @@ jobs:
           echo "IB_DIR=$IB_DIR" >> $GITHUB_ENV
 
 
+          echo "Using:"
+          echo "$IB_DIR"
+
+
 
       - name: Check profile
         run: |
 
           cd "$IB_DIR"
 
-          make info | grep zbt
+          make info | grep -A5 zbt
 
 
 
@@ -116,7 +129,24 @@ jobs:
           cd "$IB_DIR"
 
 
-          PACKAGES="luci luci-ssl kmod-usb-core kmod-usb2 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat block-mount mount-utils bash curl ca-bundle wget-ssl unzip tar ipset iptables-mod-tproxy kmod-tun"
+          PACKAGES="luci luci-ssl \
+          kmod-usb-core \
+          kmod-usb2 \
+          kmod-usb-storage \
+          kmod-scsi-core \
+          kmod-fs-ext4 \
+          kmod-fs-vfat \
+          block-mount \
+          mount-utils \
+          bash \
+          curl \
+          ca-bundle \
+          wget-ssl \
+          unzip \
+          tar \
+          ipset \
+          iptables-mod-tproxy \
+          kmod-tun"
 
 
           make image \
@@ -126,15 +156,52 @@ jobs:
 
 
 
+      - name: Find firmware
+        run: |
+
+          echo "Searching firmware..."
+
+          find "$IB_DIR/bin" -name "*.bin"
+
+
+
       - name: Collect firmware
         run: |
 
           mkdir -p output
 
 
-          cp -rv \
-          "$IB_DIR"/bin/targets/*/* \
-          output/
+          SYSUPGRADE=$(find "$IB_DIR/bin" \
+          -name "*sysupgrade.bin" \
+          | head -n1)
+
+
+          if [ -z "$SYSUPGRADE" ]; then
+
+            echo "No sysupgrade firmware found"
+
+            exit 1
+
+          fi
+
+
+          cp -v "$SYSUPGRADE" output/
+
+
+          FACTORY=$(find "$IB_DIR/bin" \
+          -name "*factory.bin" \
+          | head -n1)
+
+
+          if [ ! -z "$FACTORY" ]; then
+
+            cp -v "$FACTORY" output/
+
+          fi
+
+
+
+          sha256sum output/*.bin > output/sha256sums.txt
 
 
           ls -lh output
@@ -146,6 +213,6 @@ jobs:
 
         with:
 
-          name: WR8305RT-OpenWrt-ImageBuilder
+          name: WR8305RT-OpenWrt-22.03.7
 
-          path: output
+          path: output/
