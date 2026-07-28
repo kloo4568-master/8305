@@ -116,7 +116,7 @@ jobs:
           cd "$IB_DIR"
 
 
-          PACKAGES="luci luci-ssl luci-app-openclash kmod-usb-core kmod-usb2 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat block-mount mount-utils bash curl ca-bundle wget-ssl unzip tar ipset iptables-mod-tproxy kmod-tun"
+          PACKAGES="luci luci-ssl kmod-usb-core kmod-usb2 kmod-usb-storage kmod-scsi-core kmod-fs-ext4 kmod-fs-vfat block-mount mount-utils bash curl ca-bundle wget-ssl unzip tar ipset iptables-mod-tproxy kmod-tun"
 
 
           make image \
