@@ -57,12 +57,12 @@ jobs:
 
 
 
-      - name: Check extroot file
+      - name: Check files
         run: |
 
           if [ ! -f files/etc/uci-defaults/99-extroot ]; then
-            echo "99-extroot missing"
-            exit 1
+              echo "Missing extroot script"
+              exit 1
           fi
 
           chmod +x files/etc/uci-defaults/99-extroot
@@ -79,9 +79,7 @@ jobs:
           URL="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${SUBTARGET}/${IB_NAME}"
 
 
-          echo "Download:"
           echo "$URL"
-
 
           wget -O "$IB_NAME" "$URL"
 
@@ -101,15 +99,15 @@ jobs:
 
 
           if [ -z "$IB_DIR" ]; then
-            echo "ImageBuilder not found"
-            exit 1
+              echo "ImageBuilder not found"
+              exit 1
           fi
 
 
           echo "IB_DIR=$IB_DIR" >> $GITHUB_ENV
 
 
-          echo "Using:"
+          echo "ImageBuilder:"
           echo "$IB_DIR"
 
 
@@ -119,7 +117,7 @@ jobs:
 
           cd "$IB_DIR"
 
-          make info | grep -A5 zbt
+          make info | grep -A10 zbt
 
 
 
@@ -156,12 +154,20 @@ jobs:
 
 
 
-      - name: Find firmware
+      - name: Check generated files
         run: |
 
-          echo "Searching firmware..."
+          echo "========== BIN LIST =========="
 
-          find "$IB_DIR/bin" -name "*.bin"
+          find "$IB_DIR" \
+          -type f \
+          \( -name "*.bin" -o -name "*.img" \) \
+          -ls || true
+
+
+          echo "========== TARGET DIR =========="
+
+          ls -lh "$IB_DIR/bin/targets/" || true
 
 
 
@@ -171,37 +177,29 @@ jobs:
           mkdir -p output
 
 
-          SYSUPGRADE=$(find "$IB_DIR/bin" \
-          -name "*sysupgrade.bin" \
+          FILE=$(find "$IB_DIR" \
+          -type f \
+          -name "*.bin" \
           | head -n1)
 
 
-          if [ -z "$SYSUPGRADE" ]; then
+          if [ -z "$FILE" ]; then
 
-            echo "No sysupgrade firmware found"
+              echo "没有找到固件文件"
 
-            exit 1
+              exit 1
 
           fi
 
 
-          cp -v "$SYSUPGRADE" output/
+          echo "复制固件:"
+          echo "$FILE"
 
 
-          FACTORY=$(find "$IB_DIR/bin" \
-          -name "*factory.bin" \
-          | head -n1)
+          cp "$FILE" output/
 
 
-          if [ ! -z "$FACTORY" ]; then
-
-            cp -v "$FACTORY" output/
-
-          fi
-
-
-
-          sha256sum output/*.bin > output/sha256sums.txt
+          sha256sum output/* > output/sha256sums.txt
 
 
           ls -lh output
