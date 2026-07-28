@@ -15,7 +15,7 @@ config global mount
 # Extroot overlay
 config mount
         option target '/overlay'
-        option uuid 'c7b3111f-27cc-b74a-8918-8f8bf869b8bc'
+        option uuid '739E7184-FEF2-5549-856C-42A21B8A9713'
         option fstype 'ext4'
         option options 'rw,noatime'
         option enabled '1'
