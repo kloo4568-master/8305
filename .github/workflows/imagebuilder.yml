@@ -2,25 +2,26 @@ name: Imagebuilder CI
 
 on:
   workflow_dispatch:
+
     inputs:
 
       openwrt_version:
-        description: 'OpenWrt version'
+        description: OpenWrt version
         required: true
         default: '22.03.5'
 
       target:
-        description: 'Target'
+        description: Target
         required: true
         default: 'ramips'
 
       subtarget:
-        description: 'Subtarget'
+        description: Subtarget
         required: true
         default: 'mt7620'
 
       profile:
-        description: 'Device profile'
+        description: Device profile
         required: true
         default: 'zbtlink_zbt-wr8305rt'
 
@@ -57,17 +58,16 @@ jobs:
 
 
 
-      - name: Check files
+      - name: Check extroot
         run: |
 
           if [ ! -f files/etc/uci-defaults/99-extroot ]; then
-              echo "Missing extroot script"
-              exit 1
+            echo "缺少99-extroot"
+            exit 1
           fi
 
-          chmod +x files/etc/uci-defaults/99-extroot
 
-          ls -l files/etc/uci-defaults/
+          chmod +x files/etc/uci-defaults/99-extroot
 
 
 
@@ -76,10 +76,12 @@ jobs:
 
           IB_NAME="openwrt-imagebuilder-${OPENWRT_VERSION}-${TARGET}-${SUBTARGET}.Linux-x86_64.tar.xz"
 
+
           URL="https://downloads.openwrt.org/releases/${OPENWRT_VERSION}/targets/${TARGET}/${SUBTARGET}/${IB_NAME}"
 
 
           echo "$URL"
+
 
           wget -O "$IB_NAME" "$URL"
 
@@ -99,15 +101,14 @@ jobs:
 
 
           if [ -z "$IB_DIR" ]; then
-              echo "ImageBuilder not found"
-              exit 1
+            echo "找不到ImageBuilder"
+            exit 1
           fi
 
 
           echo "IB_DIR=$IB_DIR" >> $GITHUB_ENV
 
 
-          echo "ImageBuilder:"
           echo "$IB_DIR"
 
 
@@ -117,7 +118,8 @@ jobs:
 
           cd "$IB_DIR"
 
-          make info | grep -A10 zbt
+
+          make info | grep -A15 zbtlink_zbt-wr8305rt
 
 
 
@@ -148,26 +150,31 @@ jobs:
 
 
           make image \
-            PROFILE="${PROFILE}" \
-            PACKAGES="${PACKAGES}" \
-            FILES="../files"
+          PROFILE="${PROFILE}" \
+          PACKAGES="${PACKAGES}" \
+          FILES="../files"
 
 
 
-      - name: Check generated files
+      - name: Debug firmware
         run: |
 
-          echo "========== BIN LIST =========="
+          echo "========== BIN目录 =========="
 
-          find "$IB_DIR" \
+          ls -R "$IB_DIR/bin" || true
+
+
+          echo "========== 查找固件 =========="
+
+
+          find "$IB_DIR/bin" \
           -type f \
-          \( -name "*.bin" -o -name "*.img" \) \
+          \( \
+          -name "*sysupgrade.bin" \
+          -o \
+          -name "*factory.bin" \
+          \) \
           -ls || true
-
-
-          echo "========== TARGET DIR =========="
-
-          ls -lh "$IB_DIR/bin/targets/" || true
 
 
 
@@ -177,29 +184,33 @@ jobs:
           mkdir -p output
 
 
-          FILE=$(find "$IB_DIR" \
+          FIRMWARE=$(find "$IB_DIR/bin" \
           -type f \
-          -name "*.bin" \
+          \( \
+          -name "*sysupgrade.bin" \
+          -o \
+          -name "*factory.bin" \
+          \) \
           | head -n1)
 
 
-          if [ -z "$FILE" ]; then
+          if [ -z "$FIRMWARE" ]; then
 
-              echo "没有找到固件文件"
+            echo "没有找到固件文件"
 
-              exit 1
+            exit 1
 
           fi
 
 
-          echo "复制固件:"
-          echo "$FILE"
+          echo "复制:"
+          echo "$FIRMWARE"
 
 
-          cp "$FILE" output/
+          cp "$FIRMWARE" output/
 
 
-          sha256sum output/* > output/sha256sums.txt
+          sha256sum output/*.bin > output/sha256sums.txt
 
 
           ls -lh output
@@ -211,6 +222,6 @@ jobs:
 
         with:
 
-          name: WR8305RT-OpenWrt-22.03.7
+          name: WR8305RT-OpenWrt-22.03.5
 
           path: output/
